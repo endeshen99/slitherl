@@ -1,0 +1,2 @@
+from gym_foo.envs.slitherl_env import SlitherlEnv
+from gym_foo.envs.slitherl_extrahard_env import SlitherlExtraHardEnv
