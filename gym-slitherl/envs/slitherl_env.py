@@ -126,19 +126,34 @@ class SlitherlEnv(gym.Env):
     
   
   def _collisions(self):
-    #here, we will create a tensor kill of size env_num, snake_num. equals 1 if that snake is alive, 0 otherwise
-    kill = torch.ones(self.env_num, self.snake_num)
+    #here, we will create a tensor preserve of size env_num, snake_num. equals 1 if that snake is alive, 0 otherwise
+    preserve = torch.ones(self.env_num, self.snake_num)
     #first we look at those that have their head at the boundary, i.e. head channel =0
     boundary_snakes = self.snakes[:, :, 0, :, :].sum(-1).sum(-1) < EPS
-    kill.add_(-(boundary_snakes.float()))
+    preserve.add_(-(boundary_snakes.float()))
     #now we look at those that collide with other snakes or with themselves
-
+    #first check if collided into any snake's body
+    body_collided_snakes = (self.snakes[:, :, 1, :, :].sum(1).unsqueeze(1) * self.snakes[:, :, 0, :, :]).sum(-1).sum(-1) > EPS
+    preserve.add_(-(body_collided_snakes.float()))
+    #then check if collided into other snake's head
+    head_collided_snakes = (self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1) - self.snakes[:, :, 0, :, :]).prod(-1).prod(-1) > EPS
+    preserve.add_(-(head_collided_snakes.float()))
 
     #now we add the fruits coming from the corpse of snakes
+    kill = (boundary_snakes + body_collided_snakes + head_collided_snakes).float()
+    # if boundary_snakes.sum() > 0:
+    #   print("hit boundary")
+    # if body_collided_snakes.sum() > 0:
+    #   print("hit body")
+    # if head_collided_snakes.sum() > 0:
+    #   print("hit head")
 
-    kill = kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, 2, self.size, self.size)
-    self.snakes = self.snakes * kill
+    # print((kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).sum()))
+    new_fruit = (self.snakes * kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)).sum(1).sum(1)
+    self.fruits.add_(new_fruit)
 
+    preserve = preserve.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, 2, self.size, self.size)
+    self.snakes = self.snakes * preserve
     
 
 
@@ -178,7 +193,7 @@ class SlitherlEnv(gym.Env):
       body_rgb = np.stack([body_pos, body_pos, body_pos], axis = -1) * body_color
 
       # board_pos are where there are no heads, fruits, or bodies
-      board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit <= 0).astype(np.uint8)
+      board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit_pos <= 0).astype(np.uint8)
       board_rgb = np.stack([board_pos, board_pos, board_pos], axis = -1) * board_color
 
       # add the rgb arrays to generate the whole image
