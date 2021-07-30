@@ -9,13 +9,15 @@ EPS = 1e-6
 
 
 
+env_num = 1
+snake_num = 10
 
+env = SlitherlEnv(env_num, snake_num)
 
-env = SlitherlEnv(2, 10)
-
-for _ in range(100):
+for _ in range(300):
     env.render()
-    actions = torch.randint(-1, 2, (2,10))
+    # actions: 0 forward, -1 counterclockwise, 1 clockwise
+    actions = torch.randint(-1, 2, (env_num, snake_num)).float()
     env.step(actions)
     time.sleep(0.1)
 

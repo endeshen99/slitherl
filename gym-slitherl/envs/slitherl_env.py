@@ -6,7 +6,7 @@ from gym.spaces.discrete import Discrete
 from gym.envs.classic_control import rendering
 import torch
 from torch.nn import functional as F
-
+from PIL import Image
 
 
 EPS = 1e-6
@@ -39,8 +39,9 @@ ORIENTATION_FILTERS = torch.tensor([
 
 class SlitherlEnv(gym.Env):
   metadata = {'render.modes': ['human']}
-  def __init__(self, env_num, snake_num, size = 40):
+  def __init__(self, env_num, snake_num, size = 40, resize_scale = 5):
     self.size = size
+    self.resize_scale = resize_scale
     self.snake_num = snake_num
     self.env_num = env_num
     self.snakes = torch.zeros(env_num, snake_num, 2, size, size)
@@ -54,12 +55,9 @@ class SlitherlEnv(gym.Env):
       self.snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(env_num))
       self.snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(env_num))
     
-    self.snake_viewer = rendering.Viewer(size*10, size*10)
-    self.snake_viewer.render(return_rgb_array=True)
+    self.viewers = [rendering.SimpleImageViewer() for _ in range(self.env_num)]
 
   
-
-
 
   #action is of size env_num*snake_num, can be -1, 0, 1
   def _move_head_body(self, actions):
@@ -132,7 +130,7 @@ class SlitherlEnv(gym.Env):
     kill = torch.ones(self.env_num, self.snake_num)
     #first we look at those that have their head at the boundary, i.e. head channel =0
     boundary_snakes = self.snakes[:, :, 0, :, :].sum(-1).sum(-1) < EPS
-    kill.add_(-(boundary_snakes.int()))
+    kill.add_(-(boundary_snakes.float()))
     #now we look at those that collide with other snakes
 
     #now we add the fruits coming from the corpse of snakes
@@ -155,17 +153,36 @@ class SlitherlEnv(gym.Env):
   def reset(self):
     ...
   def render(self, mode='human'):
-    self.snake_viewer.geoms.clear()
-    fruit_and_snake = self._snake_pos() + self.fruits[:, 0, :, :]
-    for i in range(self.size):
-      for j in range(self.size):
-        if fruit_and_snake[0,i,j] > EPS:
-          segment = rendering.FilledPolygon([(10*i, 10*j + 10), 
-                                    (10*i, 10*j), 
-                                    (10*i + 10, 10*j), 
-                                    (10*i + 10, 10*j + 10)])
-          self.snake_viewer.add_geom(segment)
-    self.snake_viewer.render(return_rgb_array=True)
+
+    head_color = [0, 0, 0]
+    body_color = [105, 105, 105]
+    board_color = [255, 255, 255]
+    fruit_color = [255, 0, 0]
+
+    for idx, viewer in enumerate(self.viewers):   # rendering one env at a time
+      snakes = self.snakes.detach().cpu().numpy()
+      fruits = self.fruits.detach().cpu().numpy()
+
+      fruit = fruits[idx, 0, :, :]    # shape size by size
+      fruit_rgb = np.stack([fruit, fruit, fruit], axis = -1).astype(np.uint8) * fruit_color
+
+      head_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) > 0).astype(np.uint8)   # shape size by size
+      head_rgb = np.stack([head_pos, head_pos, head_pos], axis = -1) * head_color
+
+      body_pos = (snakes[idx, :, 1, :, :].sum(axis = 0) > 0).astype(np.uint8)   # shape size by size
+      body_rgb = np.stack([body_pos, body_pos, body_pos], axis = -1) * body_color
+
+      board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit <= 0).astype(np.uint8)
+      board_rgb = np.stack([board_pos, board_pos, board_pos], axis = -1) * board_color
+
+      img_to_show = head_rgb + board_rgb + body_rgb + fruit_rgb   # add the rgb arrays
+
+      img_to_show_enlarged = np.array(Image.fromarray(img_to_show.astype(np.uint8)).resize(
+        (self.size * self.resize_scale,
+        self.size * self.resize_scale), resample=Image.NEAREST
+      ))
+
+      viewer.imshow(img_to_show_enlarged)
 
 
   def close(self):
