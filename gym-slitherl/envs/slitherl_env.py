@@ -45,7 +45,8 @@ class SlitherlEnv(gym.Env):
     self.snake_num = snake_num
     self.env_num = env_num
     self.snakes = torch.zeros(env_num, snake_num, 2, size, size)
-    self.fruits = torch.zeros(env_num, 1, size, size)
+    self.fruits = torch.zeros(env_num, size, size)
+    self.reward = torch.zeros(env_num, snake_num)
     #initiating the orientation of the snakes, 0, 1,2,3 are the four directions, zero is down, 1 is left
     self.orientations = torch.ones(env_num, snake_num)
 
@@ -77,16 +78,12 @@ class SlitherlEnv(gym.Env):
     heads.add_(head_deltas)
 
     #Now, we determine whether fruit is eaten and update the body
-    fruits = self.fruits.repeat(1, self.snake_num, 1, 1)
-    hit_fruit = (self.snakes[:, :, 0, :, :] * fruits).sum(-1).sum(-1)
-    assert hit_fruit.size() == (self.env_num, self.snake_num)
-    hit_fruit[hit_fruit!=0] = 1
-    hit_fruit.add_(-torch.ones(self.env_num, self.snake_num))
-    body_deltas = hit_fruit.unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, self.size, self.size)
-    #at this point, hit_fruit = 0 means that fuit is eaten, -1 means no fruit
-    #print(self.snakes[:,:, 1, :, :].size())
-    #print(body_deltas.size())
-    self.snakes[:, :, 1, :, :] = self.snakes[:,:, 1, :, :].add_(body_deltas).relu()
+    eaten_fruit_snakes = (self.snakes[:, :, 0, :, :] * self.fruits[:, None, :, :]).sum(-1).sum(-1)
+    assert eaten_fruit_snakes.size() == (self.env_num, self.snake_num)
+    self.reward.add_((eaten_fruit_snakes > EPS).float())
+    body_deltas = (eaten_fruit_snakes > EPS).float() - 1
+    #at this point, body_deltas = 0 means that fruit is eaten, -1 means no fruit
+    self.snakes[:, :, 1, :, :] = self.snakes[:,:, 1, :, :].add_(body_deltas[..., None, None]).relu()
     #now we add the neck of the snake
     previous_heads = (heads - head_deltas).view(self.env_num, self.snake_num, 1, self.size, self.size)
     snake_sizes = torch.max(self.snakes[:,:, 1,:,:].view(self.env_num, self.snake_num, self.size * self.size), -1)[0] \
@@ -96,8 +93,8 @@ class SlitherlEnv(gym.Env):
     self.snakes[:,:, 1:2, :,:].add_(previous_heads * snake_sizes)
 
     #finally, we delete the fruit that was eaten.
-    all_heads = self.snakes[:,:, 0, :,:].sum(1).unsqueeze(1)
-    assert all_heads.size() == (self.env_num, 1, self.size, self.size)
+    all_heads = self.snakes[:,:, 0, :,:].sum(1)
+    assert all_heads.size() == (self.env_num, self.size, self.size)
     self.fruits = self.fruits.add_(-all_heads).relu()
     
 
@@ -111,17 +108,14 @@ class SlitherlEnv(gym.Env):
   #this function spawn fruits when there are no fruit available.
   def _spawn_fruit(self):
     coord = torch.randint(0, self.size, (2,))
-    new_fruit = torch.zeros(self.env_num, 1, self.size, self.size)
-    new_fruit[:, 0 , coord[0], coord[1]].add_(torch.ones(self.env_num))
+    new_fruit = torch.zeros(self.env_num, self.size, self.size)
+    new_fruit[:, coord[0], coord[1]].add_(torch.ones(self.env_num))
     #making sure nothing is added if it is a snake position
-    snake_positions = self._snake_pos().unsqueeze(1)
+    snake_positions = self._snake_pos()
     new_fruit = new_fruit.add_(-snake_positions).relu()
     #determine if the environment is empty of food.
-    have_fruit = self.fruits.sum(-1).sum(-1)
-    have_fruit[have_fruit != 0] = -1
-    have_fruit = have_fruit.add_(torch.ones(self.env_num, 1)).unsqueeze(-1).unsqueeze(-1) #now being 1 iff not have food
-    have_fruit = have_fruit.expand(self.env_num, 1, self.size, self.size)
-    new_fruit = new_fruit * have_fruit
+    have_fruit = self.fruits.sum(-1).sum(-1) < EPS
+    new_fruit = new_fruit * have_fruit[..., None, None].float()
     self.fruits.add_(new_fruit)
     
   
@@ -130,17 +124,30 @@ class SlitherlEnv(gym.Env):
     preserve = torch.ones(self.env_num, self.snake_num)
     #first we look at those that have their head at the boundary, i.e. head channel =0
     boundary_snakes = self.snakes[:, :, 0, :, :].sum(-1).sum(-1) < EPS
+    assert boundary_snakes.size() == (self.env_num, self.snake_num)
     preserve.add_(-(boundary_snakes.float()))
     #now we look at those that collide with other snakes or with themselves
     #first check if collided into any snake's body
     body_collided_snakes = (self.snakes[:, :, 1, :, :].sum(1).unsqueeze(1) * self.snakes[:, :, 0, :, :]).sum(-1).sum(-1) > EPS
+    assert body_collided_snakes.size() == (self.env_num, self.snake_num)
     preserve.add_(-(body_collided_snakes.float()))
     #then check if collided into other snake's head
     head_collided_snakes = (self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1) - self.snakes[:, :, 0, :, :]).prod(-1).prod(-1) > EPS
+    assert head_collided_snakes.size() == (self.env_num, self.snake_num)
     preserve.add_(-(head_collided_snakes.float()))
-
+    
     #now we add the fruits coming from the corpse of snakes
     kill = (boundary_snakes + body_collided_snakes + head_collided_snakes).float()
+    assert kill.size() == (self.env_num, self.snake_num)
+    new_fruit = (self.snakes * kill[..., None, None, None]).sum(1).sum(1)
+    assert new_fruit.size() == (self.env_num, self.size, self.size)
+    self.fruits.add_(new_fruit)
+    self.reward.add_((self.reward >= 0).float() * (kill * -100.0))
+
+    #update the snakes
+    self.snakes = self.snakes * preserve[..., None, None, None]
+
+    ## optional logging ##
     # if boundary_snakes.sum() > 0:
     #   print("hit boundary")
     # if body_collided_snakes.sum() > 0:
@@ -148,13 +155,8 @@ class SlitherlEnv(gym.Env):
     # if head_collided_snakes.sum() > 0:
     #   print("hit head")
 
+    # print ("the number of killed snakes:")
     # print((kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).sum()))
-    new_fruit = (self.snakes * kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)).sum(1).sum(1)
-    self.fruits.add_(new_fruit)
-
-    preserve = preserve.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, 2, self.size, self.size)
-    self.snakes = self.snakes * preserve
-    
 
 
   def step(self, action):
@@ -162,6 +164,7 @@ class SlitherlEnv(gym.Env):
     self._collisions()
     self._spawn_fruit()
   
+    # print(self.reward)
     #print("step all good")
     
 
@@ -180,7 +183,7 @@ class SlitherlEnv(gym.Env):
       fruits = self.fruits.detach().cpu().numpy()
 
       # fruit_pos shape is size by size
-      fruit_pos = fruits[idx, 0, :, :]
+      fruit_pos = fruits[idx, :, :]
       # stack three times to generate rgb array
       fruit_rgb = np.stack([fruit_pos, fruit_pos, fruit_pos], axis = -1).astype(np.uint8) * fruit_color
 
