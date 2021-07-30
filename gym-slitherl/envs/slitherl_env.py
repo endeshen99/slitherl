@@ -131,7 +131,8 @@ class SlitherlEnv(gym.Env):
     #first we look at those that have their head at the boundary, i.e. head channel =0
     boundary_snakes = self.snakes[:, :, 0, :, :].sum(-1).sum(-1) < EPS
     kill.add_(-(boundary_snakes.float()))
-    #now we look at those that collide with other snakes
+    #now we look at those that collide with other snakes or with themselves
+
 
     #now we add the fruits coming from the corpse of snakes
 
@@ -163,20 +164,27 @@ class SlitherlEnv(gym.Env):
       snakes = self.snakes.detach().cpu().numpy()
       fruits = self.fruits.detach().cpu().numpy()
 
-      fruit = fruits[idx, 0, :, :]    # shape size by size
-      fruit_rgb = np.stack([fruit, fruit, fruit], axis = -1).astype(np.uint8) * fruit_color
+      # fruit_pos shape is size by size
+      fruit_pos = fruits[idx, 0, :, :]
+      # stack three times to generate rgb array
+      fruit_rgb = np.stack([fruit_pos, fruit_pos, fruit_pos], axis = -1).astype(np.uint8) * fruit_color
 
-      head_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) > 0).astype(np.uint8)   # shape size by size
+      # head_pos shape is size by size
+      head_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) > 0).astype(np.uint8)
       head_rgb = np.stack([head_pos, head_pos, head_pos], axis = -1) * head_color
 
-      body_pos = (snakes[idx, :, 1, :, :].sum(axis = 0) > 0).astype(np.uint8)   # shape size by size
+      # body_pos shape is size by size
+      body_pos = (snakes[idx, :, 1, :, :].sum(axis = 0) > 0).astype(np.uint8)
       body_rgb = np.stack([body_pos, body_pos, body_pos], axis = -1) * body_color
 
+      # board_pos are where there are no heads, fruits, or bodies
       board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit <= 0).astype(np.uint8)
       board_rgb = np.stack([board_pos, board_pos, board_pos], axis = -1) * board_color
 
-      img_to_show = head_rgb + board_rgb + body_rgb + fruit_rgb   # add the rgb arrays
+      # add the rgb arrays to generate the whole image
+      img_to_show = head_rgb + board_rgb + body_rgb + fruit_rgb
 
+      # enlarge the tensor to become an actual board/image
       img_to_show_enlarged = np.array(Image.fromarray(img_to_show.astype(np.uint8)).resize(
         (self.size * self.resize_scale,
         self.size * self.resize_scale), resample=Image.NEAREST
