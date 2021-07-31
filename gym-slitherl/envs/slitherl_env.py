@@ -140,7 +140,7 @@ class SlitherlEnv(gym.Env):
     #now we add the fruits coming from the corpse of snakes
     kill = (boundary_snakes + body_collided_snakes + head_collided_snakes).float()
     assert kill.size() == (self.env_num, self.snake_num)
-    new_fruit = (self.snakes * kill[..., None, None, None]).sum(1).sum(1)
+    new_fruit = ((self.snakes * kill[..., None, None, None]).sum(1).sum(1) > 0).float()
     assert new_fruit.size() == (self.env_num, self.size, self.size)
     self.fruits.add_(new_fruit)
     self.reward.add_((self.reward >= 0).float() * (kill * -100.0))
@@ -179,7 +179,6 @@ class SlitherlEnv(gym.Env):
       new_snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(self.env_num))
       new_snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(self.env_num))
     need_reset = self.snakes[:, :, 0, :,:].sum(1).sum(-1).sum(-1) < EPS
-    print(need_reset)
     perserve_fruit = ~need_reset
     new_snakes = new_snakes * need_reset[(...,) + (None,) * 4].float()
     self.snakes = self.snakes + new_snakes
