@@ -55,7 +55,10 @@ class SlitherlEnv(gym.Env):
       self.snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(env_num))
       self.snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(env_num))
     
-    self.viewers = [rendering.SimpleImageViewer() for _ in range(self.env_num)]
+    self.viewers = [rendering.SimpleImageViewer() for _ in range(1)]
+
+    self.snake_viewer = rendering.Viewer(size*10, size*10)
+    self.snake_viewer.render(return_rgb_array=True)
 
   
 
@@ -75,6 +78,7 @@ class SlitherlEnv(gym.Env):
     #head_deltas should be shape (env_num*snake_num) * 4 *size * size
     head_deltas = torch.einsum('bchw,bc->bhw', [head_deltas, actions_onehot_shape]).unsqueeze(1)
     heads.add_(head_deltas)
+
 
     #Now, we determine whether fruit is eaten and update the body
     fruits = self.fruits.repeat(1, self.snake_num, 1, 1)
@@ -137,6 +141,8 @@ class SlitherlEnv(gym.Env):
     preserve.add_(-(body_collided_snakes.float()))
     #then check if collided into other snake's head
     head_collided_snakes = (self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1) - self.snakes[:, :, 0, :, :]).prod(-1).prod(-1) > EPS
+    #head_collided_snakes = (self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1).expand(self.env_num, self.snake_num, self.size, self.size)\
+                   #* self.snakes[:, :, 0, :, :]).sum(-1).sum(-1) > EPS
     preserve.add_(-(head_collided_snakes.float()))
 
     #now we add the fruits coming from the corpse of snakes
@@ -149,25 +155,66 @@ class SlitherlEnv(gym.Env):
     #   print("hit head")
 
     # print((kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).sum()))
-    new_fruit = (self.snakes * kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)).sum(1).sum(1)
+    new_fruit = (self.snakes[:, :, 1: 2, :, :] * kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)).sum(1).sum(1).unsqueeze(1)
     self.fruits.add_(new_fruit)
 
     preserve = preserve.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, 2, self.size, self.size)
     self.snakes = self.snakes * preserve
+
     
 
 
   def step(self, action):
     self._move_head_body(action)
     self._collisions()
+    self._reset_dead_env()
     self._spawn_fruit()
+
+    #print(self.snakes[0,0,1,:,:])
   
     #print("step all good")
     
+  def _reset_dead_env(self):
+    new_snakes = torch.zeros(self.env_num, self.snake_num, 2, self.size, self.size)
+    for i in range(self.snake_num):
+      new_snakes[:, i, 0, 4*i, 4*i].add_(torch.ones(self.env_num))
+      new_snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(self.env_num))
+      new_snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(self.env_num))
+    need_reset = self.snakes[:, :, 0, :,:].sum(1).sum(-1).sum(-1) < EPS
+    need_reset = need_reset.int()
+    new_snakes = new_snakes * need_reset.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    self.snakes = self.snakes + new_snakes
+    perserve_fruit = - (need_reset - torch.ones(self.env_num))
+    self.fruits = self.fruits * (perserve_fruit.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1))
+
+
+
+
+
+
+
+
 
 
   def reset(self):
     ...
+
+  
+
+  def primitive_render(self, mode='human'):
+    self.snake_viewer.geoms.clear()
+    fruit_and_snake = self._snake_pos() + self.fruits[:, 0, :, :]
+    for i in range(self.size):
+      for j in range(self.size):
+        if fruit_and_snake[0,i,j] > EPS:
+          segment = rendering.FilledPolygon([(10*i, 10*j + 10), 
+                                    (10*i, 10*j), 
+                                    (10*i + 10, 10*j), 
+                                    (10*i + 10, 10*j + 10)])
+          self.snake_viewer.add_geom(segment)
+    self.snake_viewer.render(return_rgb_array=True)
+
+
   def render(self, mode='human'):
 
     head_color = [0, 0, 0]
@@ -176,8 +223,8 @@ class SlitherlEnv(gym.Env):
     fruit_color = [255, 0, 0]
 
     for idx, viewer in enumerate(self.viewers):   # rendering one env at a time
-      snakes = self.snakes.detach().cpu().numpy()
-      fruits = self.fruits.detach().cpu().numpy()
+      snakes = self.snakes[0:1,:,:,:,:].detach().cpu().numpy()
+      fruits = self.fruits[0:1,:,:,:].detach().cpu().numpy()
 
       # fruit_pos shape is size by size
       fruit_pos = fruits[idx, 0, :, :]
