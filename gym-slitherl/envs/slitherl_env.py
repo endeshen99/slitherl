@@ -56,10 +56,7 @@ class SlitherlEnv(gym.Env):
       self.snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(env_num))
       self.snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(env_num))
     
-    self.viewers = [rendering.SimpleImageViewer() for _ in range(1)]
-
-    self.snake_viewer = rendering.Viewer(size*10, size*10)
-    self.snake_viewer.render(return_rgb_array=True)
+    self.viewer = rendering.SimpleImageViewer()
 
   
 
@@ -161,12 +158,6 @@ class SlitherlEnv(gym.Env):
 
     # print ("the number of killed snakes:")
     # print((kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).sum()))
-    new_fruit = (self.snakes[:, :, 1: 2, :, :] * kill.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)).sum(1).sum(1).unsqueeze(1)
-    self.fruits.add_(new_fruit)
-
-    preserve = preserve.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(self.env_num, self.snake_num, 2, self.size, self.size)
-    self.snakes = self.snakes * preserve
-
     
 
 
@@ -188,18 +179,11 @@ class SlitherlEnv(gym.Env):
       new_snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(self.env_num))
       new_snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(self.env_num))
     need_reset = self.snakes[:, :, 0, :,:].sum(1).sum(-1).sum(-1) < EPS
-    need_reset = need_reset.int()
-    new_snakes = new_snakes * need_reset.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    print(need_reset)
+    perserve_fruit = ~need_reset
+    new_snakes = new_snakes * need_reset[(...,) + (None,) * 4].float()
     self.snakes = self.snakes + new_snakes
-    perserve_fruit = - (need_reset - torch.ones(self.env_num))
-    self.fruits = self.fruits * (perserve_fruit.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1))
-
-
-
-
-
-
-
+    self.fruits = self.fruits * perserve_fruit[..., None, None].float()
 
 
 
@@ -229,37 +213,38 @@ class SlitherlEnv(gym.Env):
     board_color = [255, 255, 255]
     fruit_color = [255, 0, 0]
 
-    for idx, viewer in enumerate(self.viewers):   # rendering one env at a time
-      snakes = self.snakes[0:1,:,:,:,:].detach().cpu().numpy()
-      fruits = self.fruits[0:1,:,:,:].detach().cpu().numpy()
+    idx = 0
+    viewer = self.viewer
+    snakes = self.snakes.detach().cpu().numpy()
+    fruits = self.fruits.detach().cpu().numpy()
 
-      # fruit_pos shape is size by size
-      fruit_pos = fruits[idx, :, :]
-      # stack three times to generate rgb array
-      fruit_rgb = np.stack([fruit_pos, fruit_pos, fruit_pos], axis = -1).astype(np.uint8) * fruit_color
+    # fruit_pos shape is size by size
+    fruit_pos = fruits[idx, :, :]
+    # stack three times to generate rgb array
+    fruit_rgb = np.stack([fruit_pos, fruit_pos, fruit_pos], axis = -1).astype(np.uint8) * fruit_color
 
-      # head_pos shape is size by size
-      head_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) > 0).astype(np.uint8)
-      head_rgb = np.stack([head_pos, head_pos, head_pos], axis = -1) * head_color
+    # head_pos shape is size by size
+    head_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) > 0).astype(np.uint8)
+    head_rgb = np.stack([head_pos, head_pos, head_pos], axis = -1) * head_color
 
-      # body_pos shape is size by size
-      body_pos = (snakes[idx, :, 1, :, :].sum(axis = 0) > 0).astype(np.uint8)
-      body_rgb = np.stack([body_pos, body_pos, body_pos], axis = -1) * body_color
+    # body_pos shape is size by size
+    body_pos = (snakes[idx, :, 1, :, :].sum(axis = 0) > 0).astype(np.uint8)
+    body_rgb = np.stack([body_pos, body_pos, body_pos], axis = -1) * body_color
 
-      # board_pos are where there are no heads, fruits, or bodies
-      board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit_pos <= 0).astype(np.uint8)
-      board_rgb = np.stack([board_pos, board_pos, board_pos], axis = -1) * board_color
+    # board_pos are where there are no heads, fruits, or bodies
+    board_pos = (snakes[idx, :, 0, :, :].sum(axis = 0) + snakes[idx, :, 1, :, :].sum(axis = 0)+ fruit_pos <= 0).astype(np.uint8)
+    board_rgb = np.stack([board_pos, board_pos, board_pos], axis = -1) * board_color
 
-      # add the rgb arrays to generate the whole image
-      img_to_show = head_rgb + board_rgb + body_rgb + fruit_rgb
+    # add the rgb arrays to generate the whole image
+    img_to_show = head_rgb + board_rgb + body_rgb + fruit_rgb
 
-      # enlarge the tensor to become an actual board/image
-      img_to_show_enlarged = np.array(Image.fromarray(img_to_show.astype(np.uint8)).resize(
-        (self.size * self.resize_scale,
-        self.size * self.resize_scale), resample=Image.NEAREST
-      ))
+    # enlarge the tensor to become an actual board/image
+    img_to_show_enlarged = np.array(Image.fromarray(img_to_show.astype(np.uint8)).resize(
+      (self.size * self.resize_scale,
+      self.size * self.resize_scale), resample=Image.NEAREST
+    ))
 
-      viewer.imshow(img_to_show_enlarged)
+    viewer.imshow(img_to_show_enlarged)
 
 
   def close(self):

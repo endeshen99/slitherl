@@ -10,10 +10,10 @@ EPS = 1e-6
 
 
 
-a = torch.randn(4).unsqueeze(-1)
-b = torch.ones(4, 2)
-print(a)
-print(a*b)
+# a = torch.randn(4).unsqueeze(-1)
+# b = torch.ones(4, 2)
+# print(a)
+# print(a*b)
 
 
 
@@ -29,7 +29,7 @@ for _ in range(300):
     actions = torch.randint(-1, 2, (env_num, snake_num)).float()
     env.step(actions)
     time.sleep(0.1)
-    print("good")
+    # print("good")
 
 
 
