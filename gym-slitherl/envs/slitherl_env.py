@@ -49,6 +49,7 @@ class SlitherlEnv(gym.Env):
     self.reward = torch.zeros(env_num, snake_num)
     #initiating the orientation of the snakes, 0, 1,2,3 are the four directions, zero is down, 1 is left
     self.orientations = torch.ones(env_num, snake_num)
+    self.observation = torch.zeros(env_num, snake_num, 2)
 
     #putting down snake_num many length zero snake heads
     for i in range(snake_num):
@@ -166,6 +167,9 @@ class SlitherlEnv(gym.Env):
     self._collisions()
 
     assert ((self.snakes[:,:,1:2,:,:].sum(1)) * self.fruits.unsqueeze(1)).sum().round() == 0
+
+    self.observation[self.snakes[:,:,0].sum(-1).sum(-1) > 0] = self.snakes[:,:,0].nonzero()[:,2:].float()
+    self.observation[self.snakes[:,:,0].sum(-1).sum(-1) == 0] = torch.empty(2).fill_(-1.0)
 
     self._reset_dead_env()
     self._spawn_fruit()
