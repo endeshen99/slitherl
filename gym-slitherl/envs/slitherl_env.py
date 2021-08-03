@@ -133,14 +133,14 @@ class SlitherlEnv(gym.Env):
     assert body_collided_snakes.size() == (self.env_num, self.snake_num)
     preserve.add_(-(body_collided_snakes.float()))
     #then check if collided into other snake's head
-    head_collided_snakes = (self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1) - self.snakes[:, :, 0, :, :]).prod(-1).prod(-1) > EPS
+    head_collided_snakes = ((self.snakes[:, :, 0, :, :].sum(1).unsqueeze(1) * self.snakes[:, :, 0, :, :]) > 1 + EPS).sum(-1).sum(-1).byte()
     assert head_collided_snakes.size() == (self.env_num, self.snake_num)
     preserve.add_(-(head_collided_snakes.float()))
     
     #now we add the fruits coming from the corpse of snakes
     kill = (boundary_snakes + body_collided_snakes + head_collided_snakes).float()
     assert kill.size() == (self.env_num, self.snake_num)
-    new_fruit = ((self.snakes * kill[..., None, None, None]).sum(1).sum(1) > 0).float()
+    new_fruit = ((self.snakes[:,:,1,:,:] * kill[..., None, None]).sum(1) > 0).float()
     assert new_fruit.size() == (self.env_num, self.size, self.size)
     self.fruits.add_(new_fruit)
     self.reward.add_((self.reward >= 0).float() * (kill * -100.0))
@@ -164,6 +164,9 @@ class SlitherlEnv(gym.Env):
   def step(self, action):
     self._move_head_body(action)
     self._collisions()
+
+    assert ((self.snakes[:,:,1:2,:,:].sum(1)) * self.fruits.unsqueeze(1)).sum().round() == 0
+
     self._reset_dead_env()
     self._spawn_fruit()
 

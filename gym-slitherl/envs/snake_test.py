@@ -22,13 +22,13 @@ snake_num = 10
 
 env = SlitherlEnv(env_num, snake_num)
 
-for _ in range(600):
+for _ in range(3000):
     #env.primitive_render()
     env.render()
     # actions: 0 forward, -1 counterclockwise, 1 clockwise
     actions = torch.randint(-1, 2, (env_num, snake_num)).float()
     env.step(actions)
-    time.sleep(0.02)
+    time.sleep(0.05)
     # print("good")
 
 
