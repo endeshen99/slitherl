@@ -183,7 +183,7 @@ class SlitherlEnv(gym.Env):
       self.size + 2 * self.visibility, self.size + 2* self.visibility)
 
     #next we generate the masking tensor
-    heads = self.snakes[:, :, 0, :, :].view(self.env_num * self.snake_num, self.size, self.size)
+    heads = self.snakes[:, :, 0, :, :].view(self.env_num * self.snake_num, self.size, self.size).clone()
     #we want to have a head even for the dead snakes, so that the masking number works out. We can ignore the wrong tensors afterward
     default_head = torch.zeros(self.size, self.size)
     default_head[1,1] = 1
@@ -206,6 +206,7 @@ class SlitherlEnv(gym.Env):
     background = background.reshape(self.env_num * self.snake_num, self.size + 2 * self.visibility, self.size + 2 * self.visibility)
     observations = background[mask].view(self.env_num * self.snake_num, 2 * self.visibility + 1, 2 * self.visibility + 1)
     self.vision_fields = observations.view(self.vision_fields.size())
+    assert self.vision_fields.max() < 4 + EPS
     
 
 
