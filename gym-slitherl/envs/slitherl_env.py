@@ -49,6 +49,9 @@ class SlitherlEnv(gym.Env):
     self.reward = torch.zeros(env_num, snake_num)
     #initiating the orientation of the snakes, 0, 1,2,3 are the four directions, zero is down, 1 is left
     self.orientations = torch.ones(env_num, snake_num)
+    #visibility is how far a snake can see
+    self.visibility = 5
+    self.vision_fields = torch.zeros(env_num, snake_num, 2*self.visibility+1, 2*self.visibility+1)
 
     #putting down snake_num many length zero snake heads
     for i in range(snake_num):
@@ -161,6 +164,56 @@ class SlitherlEnv(gym.Env):
     
 
 
+
+
+
+
+  def _update_vision_fields(self):
+    #first we generate the background that will be cropped out
+    #1 means head, 2 body, 3 fruit, 4 outside
+    assert ((self.snakes[:,:,0:1,:,:].sum(1)) * self.fruits.unsqueeze(1)).sum() == 0 #check no fruit head overlap
+    assert ((self.snakes[:,:,1:2,:,:].sum(1)) * self.fruits.unsqueeze(1)).sum().round() == 0 #check no fruit body overlap
+    background = torch.zeros(self.env_num, self.size, self.size)
+    background.add_(self.snakes[:,:,0,:,:].sum(1)) #add heads
+    background.add_(2 * ((self.snakes[:,:,1,:,:].sum(1) > EPS).int()))
+    background.add_(3 * (self.fruits.squeeze()))
+    background = F.pad(background, (self.visibility, self.visibility, self.visibility, self.visibility) \
+      , "constant", 4)
+    background = background.unsqueeze(1).expand(self.env_num, self.snake_num, \
+      self.size + 2 * self.visibility, self.size + 2* self.visibility)
+
+    #next we generate the masking tensor
+    heads = self.snakes[:, :, 0, :, :].view(self.env_num * self.snake_num, self.size, self.size)
+    #we want to have a head even for the dead snakes, so that the masking number works out. We can ignore the wrong tensors afterward
+    default_head = torch.zeros(self.size, self.size)
+    default_head[1,1] = 1
+    need_head = heads.sum(-1).sum(-1) < EPS
+    add_head = (need_head[..., None, None].int().expand(heads.size())) * (default_head.unsqueeze(0).expand(heads.size()))
+    heads = heads.add_(add_head)
+    heads = F.pad(heads, (self.visibility, self.visibility, self.visibility, self.visibility), "constant", 0)
+    
+
+    heads = heads.unsqueeze(1)
+    assert heads.size() == (self.env_num * self.snake_num, 1, self.size + 2 * self.visibility, self.size + 2 * self.visibility)
+    
+    filt = torch.ones(1, 1, 2 * self.visibility + 1, 2 * self.visibility + 1)
+    mask = (F.conv2d(heads, filt, padding = self.visibility) > EPS)
+    assert mask.size() == (self.env_num * self.snake_num, 1, self.size + 2 * self.visibility, self.size + 2 * self.visibility)
+    mask = mask.view(self.env_num * self.snake_num, self.size + 2 * self.visibility, self.size + 2 * self.visibility)
+
+
+    #next we apply the masking
+    background = background.reshape(self.env_num * self.snake_num, self.size + 2 * self.visibility, self.size + 2 * self.visibility)
+    observations = background[mask].view(self.env_num * self.snake_num, 2 * self.visibility + 1, 2 * self.visibility + 1)
+    self.vision_fields = observations.view(self.vision_fields.size())
+    
+
+
+
+
+
+
+
   def step(self, action):
     self._move_head_body(action)
     self._collisions()
@@ -169,6 +222,7 @@ class SlitherlEnv(gym.Env):
 
     self._reset_dead_env()
     self._spawn_fruit()
+    self._update_vision_fields()
 
     #print(self.snakes[0,0,1,:,:])
   
