@@ -182,10 +182,11 @@ class SlitherlEnv(gym.Env):
       new_snakes[:, i, 1, 4*i, 4*i + 1].add_(2*torch.ones(self.env_num))
       new_snakes[:, i, 1, 4*i, 4*i + 2].add_(torch.ones(self.env_num))
     need_reset = self.snakes[:, :, 0, :,:].sum(1).sum(-1).sum(-1) < EPS
-    perserve_fruit = ~need_reset
+    need_perserve = ~need_reset
     new_snakes = new_snakes * need_reset[(...,) + (None,) * 4].float()
     self.snakes = self.snakes + new_snakes
-    self.fruits = self.fruits * perserve_fruit[..., None, None].float()
+    self.fruits = self.fruits * need_perserve[..., None, None].float()
+    self.orientations = self.orientations * need_perserve[..., None].float() + torch.ones(self.env_num, self.snake_num) * need_reset[..., None].float()
 
 
 
